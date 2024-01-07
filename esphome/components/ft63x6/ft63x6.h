@@ -23,6 +23,9 @@ class FT63X6Touchscreen : public Touchscreen, public i2c::I2CDevice {
 
   void set_interrupt_pin(InternalGPIOPin *pin) { this->interrupt_pin_ = pin; }
   void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
+  
+  void set_x_raw_max(int16_t x_raw_max) { this->x_raw_max_ = x_raw_max; }
+  void set_y_raw_max(int16_t y_raw_max) { this->y_raw_max_ = y_raw_max; }
 
  protected:
   void hard_reset_();
@@ -31,6 +34,9 @@ class FT63X6Touchscreen : public Touchscreen, public i2c::I2CDevice {
 
   InternalGPIOPin *interrupt_pin_{nullptr};
   GPIOPin *reset_pin_{nullptr};
+  
+  int16_t x_raw_max_;
+  int16_t y_raw_max_;
 
   uint8_t read_touch_count_();
   uint16_t read_touch_coordinate_(uint8_t coordinate);

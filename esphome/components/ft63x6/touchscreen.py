@@ -3,7 +3,7 @@ import esphome.config_validation as cv
 
 from esphome import pins
 from esphome.components import i2c, touchscreen
-from esphome.const import CONF_ID, CONF_INTERRUPT_PIN, CONF_RESET_PIN
+from esphome.const import CONF_ID, CONF_INTERRUPT_PIN, CONF_RESET_PIN, CONF_WIDTH, CONF_HEIGHT
 
 CODEOWNERS = ["@gpambrozio"]
 DEPENDENCIES = ["i2c"]
@@ -26,6 +26,8 @@ CONFIG_SCHEMA = touchscreen.TOUCHSCREEN_SCHEMA.extend(
                 pins.internal_gpio_input_pin_schema
             ),
             cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_WIDTH, default=320): cv.positive_int,
+            cv.Optional(CONF_HEIGHT, default=480): cv.positive_int,
         }
     ).extend(i2c.i2c_device_schema(0x38))
 )
@@ -42,3 +44,9 @@ async def to_code(config):
     if reset_pin_config := config.get(CONF_RESET_PIN):
         reset_pin = await cg.gpio_pin_expression(reset_pin_config)
         cg.add(var.set_reset_pin(reset_pin))
+
+    cg.add(var.x_raw_max(config[CONF_WIDTH]))
+    cg.add(var.y_raw_max(config[CONF_HEIGHT]))
+
+
+
