@@ -10,8 +10,10 @@ void GreeClimate::set_model(Model model) { this->model_ = model; }
 
 void GreeClimate::transmit_state() {
   bool turboMode = false;
-  bool lightMode = true;
+  bool lightMode = false;
   bool healthMode = true;
+  bool econoMode = true;
+  
   uint8_t remote_state[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00};
 
   remote_state[0] = this->fan_speed_() | this->operation_mode_();
@@ -49,6 +51,13 @@ void GreeClimate::transmit_state() {
     } else {
       remote_state[2] &= (1 << 6);  // Clear bit 6 (HEALTH OFF)
     }
+
+    if (econoMode) {
+      remote_state[2] |= (1 << 7);  // Set bit 7 (X-FAN ON)
+    } else {
+      remote_state[2] &= (1 << 7);  // Clear bit 7 (X-FAN OFF)
+    }
+
 
     if (this->vertical_swing_() == GREE_VDIR_SWING) {
       remote_state[0] |= (1 << 6);  // Enable swing by setting bit 6
