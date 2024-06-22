@@ -43,7 +43,7 @@ void GreeClimate::transmit_state() {
     if (lightMode) {
       remote_state[2] |= (1 << 5);  // Set bit 5 (LIGHT ON)
     } else {
-      remote_state[2] &= (1 << 5);  // Clear bit 4 (LIGHT OFF)
+      remote_state[2] &= (1 << 5);  // Clear bit 5 (LIGHT OFF)
     }
 
     if (healthMode) {
