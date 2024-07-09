@@ -12,7 +12,7 @@ void GreeClimate::transmit_state() {
   bool turboMode = false;
   bool lightMode = false;
   bool healthMode = true;
-  bool econoMode = true;
+  bool xfanMode = true;
   
   uint8_t remote_state[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00};
 
@@ -58,7 +58,7 @@ void GreeClimate::transmit_state() {
       remote_state[2] &= (1 << 6);  // Clear bit 6 (HEALTH OFF)
     }
 
-    if (econoMode) {
+    if (xfanMode) {
       remote_state[2] |= (1 << 7);  // Set bit 7 (X-FAN ON)
     } else {
       remote_state[2] &= (1 << 7);  // Clear bit 7 (X-FAN OFF)
