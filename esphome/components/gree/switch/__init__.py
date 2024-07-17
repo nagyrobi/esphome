@@ -17,7 +17,7 @@ from .. import (
 CONF_SWITCH_LIGHT = "light"
 CONF_SWITCH_TURBO = "turbo"
 CONF_SWITCH_HEALTH = "health"
-CONF_SWITCH_ECONO = "econo"
+CONF_SWITCH_XFAN = "xfan"
 
 CONF_GREE_ID = "gree_climate_id"
 
@@ -35,15 +35,15 @@ GreeTurboSwitch = gree_ns.class_(
 GreeHealthSwitch = gree_ns.class_(
     "GreeHealthSwitch", switch.Switch, cg.Component
 )
-GreeEconoSwitch = gree_ns.class_(
-    "GreeEconoSwitch", switch.Switch, cg.Component
+GreeXfanSwitch = gree_ns.class_(
+    "GreeXfanSwitch", switch.Switch, cg.Component
 )
 
 CONF_SWITCH_LIGHT = switch.SWITCH_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(GreeLightSwitch),
         cv.Required(CONF_GREE_ID): cv.use_id(GreeClimate), # ?? only accept id of a gree climate here
-        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only yaa here
+        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only GREE_YAN || GREE_YAA ||  GREE_YAC || GREE_YAC1FB9 here
         cv.Optional(CONF_ICON, default=ICON_DISPLAY_HIGHLIGHT): cv.icon,
         cv.Optional(
             CONF_ENTITY_CATEGORY, default=ENTITY_CATEGORY_CONFIG
@@ -58,7 +58,7 @@ CONF_SWITCH_TURBO = switch.SWITCH_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(GreeTurboSwitch),
         cv.Required(CONF_GREE_ID): cv.use_id(GreeClimate), # ?? only accept id of a gree climate here
-        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only yaa here
+        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only GREE_YAN || GREE_YAA ||  GREE_YAC || GREE_YAC1FB9 here
         cv.Optional(CONF_ICON, default=ICON_TURBO): cv.icon,
         cv.Optional(
             CONF_ENTITY_CATEGORY, default=ENTITY_CATEGORY_CONFIG
@@ -73,7 +73,7 @@ CONF_SWITCH_HEALTH = switch.SWITCH_SCHEMA.extend(
     {
         cv.GenerateID(): cv.declare_id(GreeHealthSwitch),
         cv.Required(CONF_GREE_ID): cv.use_id(GreeClimate), # ?? only accept id of a gree climate here
-        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only yaa here
+        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only GREE_YAN || GREE_YAA ||  GREE_YAC || GREE_YAC1FB9 here
         cv.Optional(CONF_ICON, default=ICON_IONIZE_ATOM): cv.icon,
         cv.Optional(
             CONF_ENTITY_CATEGORY, default=ENTITY_CATEGORY_CONFIG
@@ -84,11 +84,11 @@ CONF_SWITCH_HEALTH = switch.SWITCH_SCHEMA.extend(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-CONF_SWITCH_ECONO = switch.SWITCH_SCHEMA.extend(
+CONF_SWITCH_XFAN = switch.SWITCH_SCHEMA.extend(
     {
-        cv.GenerateID(): cv.declare_id(GreeEconoSwitch),
+        cv.GenerateID(): cv.declare_id(GreeXfanSwitch),
         cv.Required(CONF_GREE_ID): cv.use_id(GreeClimate), # ?? only accept id of a gree climate here
-        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only yaa here
+        cv.Required(CONF_MODEL): cv.enum(MODELS), # accept only GREE_YAN || GREE_YAA ||  GREE_YAC || GREE_YAC1FB9
         cv.Optional(CONF_ICON, default=ICON_GREEN_OUTLINE): cv.icon,
         cv.Optional(
             CONF_ENTITY_CATEGORY, default=ENTITY_CATEGORY_CONFIG
