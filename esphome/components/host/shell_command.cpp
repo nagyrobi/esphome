@@ -41,6 +41,37 @@ static bool create_pipe(int fds[2]) {
   return true;
 }
 
+static std::string shell_quote(const std::string &value) {
+  std::string quoted = "'";
+  for (char c : value) {
+    if (c == '\'') {
+      quoted += "'\"'\"'";
+    } else {
+      quoted.push_back(c);
+    }
+  }
+  quoted += "'";
+  return quoted;
+}
+
+static std::string prepend_export_commands(const ShellCommandOptions &options, const std::string &command) {
+  if (options.environment.empty()) {
+    return command;
+  }
+
+  std::string export_prefix;
+  export_prefix.reserve(command.size() + options.environment.size() * 16);
+  for (const auto &kv : options.environment) {
+    export_prefix += "export ";
+    export_prefix += kv.first;
+    export_prefix += "=";
+    export_prefix += shell_quote(kv.second);
+    export_prefix += ";\n";
+  }
+  export_prefix += command;
+  return export_prefix;
+}
+
 ShellCommandResult execute_shell_command(const std::string &command, const ShellCommandOptions &options) {
   ShellCommandResult result{};
 
@@ -79,7 +110,8 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
     close(stdout_pipe[1]);
     close(stderr_pipe[0]);
     close(stderr_pipe[1]);
-    const char *argv[] = {shell.c_str(), "-c", command.c_str(), nullptr};
+    std::string command_with_exports = prepend_export_commands(options, command);
+    const char *argv[] = {shell.c_str(), "-c", command_with_exports.c_str(), nullptr};
     execve(shell.c_str(), const_cast<char *const *>(argv), ::environ);
     _exit(127);
   }
