@@ -419,35 +419,6 @@ assert state.missing_state is False
 
 #### 7. Debugging Tips
 
-##### Host Shell Command Boolean Parsing Example
-When publishing a template switch state from a host shell command, ensure the lambda returns a boolean based on the parsed `On`/`Off` output.
-
-```yaml
-interval:
-  - interval: 5s
-    then:
-      - switch.template.publish:
-          id: host_display_switch
-          state: !lambda |-
-            esphome::host::ShellCommandOptions opts;
-            opts.environment = {
-              {"DISPLAY", ":0.0"},
-            };
-            auto result = esphome::host::execute_shell_command(
-                "xset -q | awk '/Monitor is/ {print $NF; exit}'", opts);
-            auto load_str = result.stdout_output;
-            load_str.erase(std::remove_if(load_str.begin(), load_str.end(), ::isspace), load_str.end());
-            auto parsed = parse_on_off(load_str.c_str(), "On", "Off");
-            if (parsed == esphome::PARSE_ON) {
-              return true;
-            }
-            if (parsed == esphome::PARSE_OFF) {
-              return false;
-            }
-            ESP_LOGW("host.shell", "Unable to parse monitor state from output: %s", load_str.c_str());
-            return id(host_display_switch).state;
-```
-
 - Use `pytest -s` to see ESPHome output during tests
 - Add descriptive failure messages to assertions
 - Use `pytest.fail()` with detailed error info for timeouts
