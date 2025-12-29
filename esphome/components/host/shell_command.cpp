@@ -80,14 +80,6 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
     for (const auto &kv : options.environment) {
       env_map[kv.first] = kv.second;
     }
-    std::vector<std::string> custom_env_strings;
-    custom_env_strings.reserve(options.environment.size());
-    for (const auto &kv : options.environment) {
-      auto it = env_map.find(kv.first);
-      if (it != env_map.end()) {
-        custom_env_strings.push_back(it->first + "=" + it->second);
-      }
-    }
 
     std::vector<std::string> env_strings;
     env_strings.reserve(env_map.size());
@@ -103,19 +95,16 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
     envp.push_back(nullptr);
 
     std::string env_log;
-    if (custom_env_strings.empty()) {
-      env_log = "none";
-    } else {
-      for (size_t i = 0; i < custom_env_strings.size(); i++) {
-        if (i != 0) {
-          env_log.append(", ");
-        }
-        env_log.append(custom_env_strings[i]);
+    for (size_t i = 0; i < env_strings.size(); i++) {
+      if (i != 0) {
+        env_log.append(", ");
       }
+      env_log.append(env_strings[i]);
     }
 
-    ESP_LOGD(TAG, "Executing command with shell '%s' and %zu custom env vars (%s): %s", shell.c_str(),
-             options.environment.size(), env_log.c_str(), command.c_str());
+    ESP_LOGD(TAG, "Executing command with shell '%s', %zu custom env vars, %zu total env vars: %s", shell.c_str(),
+             options.environment.size(), env_strings.size(), env_log.c_str());
+    ESP_LOGD(TAG, "Command: %s", command.c_str());
 
     if (dup2(stdout_pipe[1], STDOUT_FILENO) == -1 || dup2(stderr_pipe[1], STDERR_FILENO) == -1) {
       _exit(127);
