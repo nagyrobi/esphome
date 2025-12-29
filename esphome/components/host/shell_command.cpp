@@ -11,8 +11,8 @@
 #include <array>
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <fcntl.h>
-#include <map>
 #include <string>
 #include <sys/select.h>
 #include <sys/types.h>
@@ -24,6 +24,7 @@ namespace esphome {
 namespace host {
 
 static const char *const TAG = "host.shell";
+extern char **environ;
 
 static bool create_pipe(int fds[2]) {
 #ifdef O_CLOEXEC
@@ -38,19 +39,6 @@ static bool create_pipe(int fds[2]) {
   fcntl(fds[0], F_SETFD, FD_CLOEXEC);
   fcntl(fds[1], F_SETFD, FD_CLOEXEC);
   return true;
-}
-
-static std::map<std::string, std::string> current_environment() {
-  std::map<std::string, std::string> env_map;
-  for (char **env = ::environ; env != nullptr && *env != nullptr; ++env) {
-    const std::string entry(*env);
-    auto separator = entry.find('=');
-    if (separator == std::string::npos) {
-      continue;
-    }
-    env_map[entry.substr(0, separator)] = entry.substr(separator + 1);
-  }
-  return env_map;
 }
 
 ShellCommandResult execute_shell_command(const std::string &command, const ShellCommandOptions &options) {
@@ -75,24 +63,11 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
 
   if (pid == 0) {
     std::string shell = options.shell.empty() ? "/bin/sh" : options.shell;
-
-    auto env_map = current_environment();
     for (const auto &kv : options.environment) {
-      env_map[kv.first] = kv.second;
+      if (setenv(kv.first.c_str(), kv.second.c_str(), 1) != 0) {
+        ESP_LOGW(TAG, "Failed to set environment variable %s: errno=%d", kv.first.c_str(), errno);
+      }
     }
-
-    std::vector<std::string> env_strings;
-    env_strings.reserve(env_map.size());
-    for (const auto &kv : env_map) {
-      env_strings.push_back(kv.first + "=" + kv.second);
-    }
-
-    std::vector<char *> envp;
-    envp.reserve(env_strings.size() + 1);
-    for (auto &entry : env_strings) {
-      envp.push_back(entry.data());
-    }
-    envp.push_back(nullptr);
 
     ESP_LOGD(TAG, "Executing command with shell '%s' and %zu custom env vars: %s", shell.c_str(),
              options.environment.size(), command.c_str());
@@ -105,7 +80,7 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
     close(stderr_pipe[0]);
     close(stderr_pipe[1]);
     const char *argv[] = {shell.c_str(), "-c", command.c_str(), nullptr};
-    execve(shell.c_str(), const_cast<char *const *>(argv), envp.data());
+    execve(shell.c_str(), const_cast<char *const *>(argv), ::environ);
     _exit(127);
   }
 
