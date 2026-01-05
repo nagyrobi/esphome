@@ -3,9 +3,15 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "preferences.h"
+#ifdef USE_LOGGER
+#include "esphome/components/logger/logger.h"
+#endif
 
 #include <sched.h>
 #include <time.h>
+#include <atomic>
+#include <cstdio>
+#include <csignal>
 #include <cmath>
 #include <cstdlib>
 
@@ -66,12 +72,32 @@ uint32_t arch_get_cpu_freq_hz() { return 1000000000U; }
 
 void setup();
 void loop();
+
+namespace {
+std::atomic_bool stop_requested{false};
+
+void handle_signal(int) { stop_requested.store(true); }
+}  // namespace
+
 int main() {
+  std::signal(SIGTERM, handle_signal);
+  std::signal(SIGINT, handle_signal);
+
   esphome::host::setup_preferences();
   setup();
-  while (true) {
+  while (!stop_requested.load()) {
     loop();
   }
+
+  if (esphome::global_preferences != nullptr) {
+    esphome::global_preferences->sync();
+  }
+#ifdef USE_LOGGER
+  if (esphome::logger::global_logger != nullptr) {
+    std::fflush(stdout);
+  }
+#endif
+  return 0;
 }
 
 #endif  // USE_HOST
