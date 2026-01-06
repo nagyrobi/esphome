@@ -20,9 +20,11 @@ CODEOWNERS = ["@esphome/core", "@clydebarrow"]
 AUTO_LOAD = ["network", "preferences"]
 IS_TARGET_PLATFORM = True
 
+CONF_ALLOW_SHELL_COMMANDS = "allow_shell_commands"
+
 
 def set_core_data(config):
-    CORE.data[KEY_HOST] = {}
+    CORE.data[KEY_HOST] = {CONF_ALLOW_SHELL_COMMANDS: config[CONF_ALLOW_SHELL_COMMANDS]}
     CORE.data[KEY_CORE][KEY_TARGET_PLATFORM] = PLATFORM_HOST
     CORE.data[KEY_CORE][KEY_TARGET_FRAMEWORK] = "host"
     CORE.data[KEY_CORE][KEY_FRAMEWORK_VERSION] = cv.Version(1, 0, 0)
@@ -33,6 +35,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.Optional(CONF_MAC_ADDRESS, default="98:35:69:ab:f6:79"): cv.mac_address,
+            cv.Optional(CONF_ALLOW_SHELL_COMMANDS, default=False): cv.boolean,
         }
     ),
     set_core_data,
@@ -48,3 +51,5 @@ async def to_code(config):
     cg.add_platformio_option("platform", "platformio/native")
     cg.add_platformio_option("lib_ldf_mode", "off")
     cg.add_platformio_option("lib_compat_mode", "strict")
+    if config[CONF_ALLOW_SHELL_COMMANDS]:
+        cg.add_define("USE_ESPHOME_HOST_ALLOW_SHELL_COMMANDS")

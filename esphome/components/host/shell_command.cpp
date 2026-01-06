@@ -15,11 +15,16 @@
 #include <map>
 #include <string>
 #include <cstring>
+#include <string_view>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <vector>
 #include <unistd.h>
+
+#ifndef USE_ESPHOME_HOST_ALLOW_SHELL_COMMANDS
+#define USE_ESPHOME_HOST_ALLOW_SHELL_COMMANDS 0
+#endif
 
 extern char **environ;  // Declare the global variable
 
@@ -50,8 +55,79 @@ static std::map<std::string, std::string> current_environment() {
   return env_map;
 }
 
-ShellCommandResult execute_shell_command(const std::string &command, const ShellCommandOptions &options) {
+static std::string describe_command(const std::vector<std::string> &command) {
+  std::string description;
+  for (const auto &arg : command) {
+    if (!description.empty()) {
+      description.append(" ");
+    }
+    description.append(arg);
+  }
+  return description;
+}
+
+static std::vector<char *> build_envp(const std::map<std::string, std::string> &env_map) {
+  std::vector<char *> envp;
+  envp.reserve(env_map.size() + 1);
+  for (const auto &[k, v] : env_map) {
+    envp.push_back(strdup((k + "=" + v).c_str()));
+  }
+  envp.push_back(nullptr);
+  return envp;
+}
+
+static void execve_with_path_search(const std::vector<std::string> &command, const std::vector<char *> &envp,
+                                    const std::string &path_env) {
+  std::vector<char *> argv;
+  argv.reserve(command.size() + 1);
+  for (const auto &arg : command) {
+    argv.push_back(const_cast<char *>(arg.c_str()));
+  }
+  argv.push_back(nullptr);
+
+  const std::string &binary = command.front();
+  if (binary.find('/') != std::string::npos || path_env.empty()) {
+    execve(binary.c_str(), argv.data(), envp.data());
+    return;
+  }
+
+  int last_errno = ENOENT;
+  size_t start = 0;
+  while (true) {
+    size_t end = path_env.find(':', start);
+    std::string_view segment(path_env.c_str() + start,
+                             (end == std::string::npos ? path_env.size() : end) - start);
+    std::string candidate;
+    if (segment.empty()) {
+      candidate = binary;
+    } else {
+      candidate.reserve(segment.size() + 1 + binary.size());
+      candidate.append(segment);
+      candidate.push_back('/');
+      candidate.append(binary);
+    }
+    execve(candidate.c_str(), argv.data(), envp.data());
+    if (errno != ENOENT) {
+      last_errno = errno;
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+
+  errno = last_errno;
+  execve(binary.c_str(), argv.data(), envp.data());
+}
+
+static ShellCommandResult execute_command_with_arguments(const std::vector<std::string> &command,
+                                                         const ShellCommandOptions &options,
+                                                         const std::string &log_command) {
   ShellCommandResult result{};
+  if (command.empty()) {
+    ESP_LOGE(TAG, "Cannot execute an empty command");
+    return result;
+  }
 
   int stdout_pipe[2];
   int stderr_pipe[2];
@@ -71,8 +147,6 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
   }
 
   if (pid == 0) {
-    std::string shell = options.shell.empty() ? "/bin/sh" : options.shell;
-
     auto env_map = current_environment();
     for (const auto &kv : options.environment) {
       env_map[kv.first] = kv.second;
@@ -88,18 +162,10 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
       env_log.append(kv.second);
     }
 
-    std::vector<char *> envp;
-    // strdup is used to allocate memory that remains valid after the map is out of scope.
-    // There is no memory leak since the process memory is replaced by execle.
-    // if execle fails, we immediately exit anyway
-    envp.reserve(env_map.size() + 1);
-    for (const auto &[k, v] : env_map) {
-      envp.push_back(strdup((k + "=" + v).c_str()));
-    }
-    envp.push_back(nullptr);
+    auto envp = build_envp(env_map);
 
-    ESP_LOGD(TAG, "Executing command with shell '%s' and %zu custom env vars: %s", shell.c_str(),
-             options.environment.size(), command.c_str());
+    ESP_LOGD(TAG, "Executing command '%s' with %zu custom env vars", log_command.c_str(),
+             options.environment.size());
     if (!env_log.empty()) {
       ESP_LOGD(TAG, "Custom environment variables from YAML: %s", env_log.c_str());
     }
@@ -111,7 +177,13 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
     close(stdout_pipe[1]);
     close(stderr_pipe[0]);
     close(stderr_pipe[1]);
-    execle(shell.c_str(), "sh", "-c", command.c_str(), nullptr, envp.data());
+
+    std::string path_env;
+    auto path_it = env_map.find("PATH");
+    if (path_it != env_map.end()) {
+      path_env = path_it->second;
+    }
+    execve_with_path_search(command, envp, path_env);
     _exit(127);
   }
 
@@ -194,6 +266,23 @@ ShellCommandResult execute_shell_command(const std::string &command, const Shell
   ESP_LOGD(TAG, "Command finished with exit code %d", result.exit_code);
 
   return result;
+}
+
+ShellCommandResult execute_command(const std::vector<std::string> &command, const ShellCommandOptions &options) {
+  return execute_command_with_arguments(command, options, describe_command(command));
+}
+
+ShellCommandResult execute_shell_command(const std::string &command, const ShellCommandOptions &options) {
+#if !USE_ESPHOME_HOST_ALLOW_SHELL_COMMANDS
+  ESP_LOGE(TAG,
+           "Shell command execution is disabled. Enable allow_shell_commands in the host "
+           "configuration to use execute_shell_command.");
+  return {};
+#else
+  std::string shell = options.shell.empty() ? "/bin/sh" : options.shell;
+  std::vector<std::string> args{shell, "-c", command};
+  return execute_command_with_arguments(args, options, shell + " -c " + command);
+#endif
 }
 
 }  // namespace esphome::host
