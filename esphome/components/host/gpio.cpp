@@ -2,6 +2,8 @@
 
 #include "gpio.h"
 #include "esphome/core/log.h"
+#include <algorithm>
+#include <string>
 
 namespace esphome {
 namespace host {
@@ -26,6 +28,13 @@ void HostGPIOPin::attach_interrupt(void (*func)(void *), void *arg, gpio::Interr
 void HostGPIOPin::pin_mode(gpio::Flags flags) { ESP_LOGD(TAG, "Setting pin %d mode to %02X", pin_, (uint32_t) flags); }
 
 size_t HostGPIOPin::dump_summary(char *buffer, size_t len) const { return snprintf(buffer, len, "GPIO%u", this->pin_); }
+
+std::string HostGPIOPin::dump_summary() const {
+  char buffer[GPIO_SUMMARY_MAX_LEN];
+  size_t len = this->dump_summary(buffer, sizeof(buffer));
+  len = std::min(len, sizeof(buffer) - 1);
+  return std::string(buffer, len);
+}
 
 bool HostGPIOPin::digital_read() { return inverted_; }
 void HostGPIOPin::digital_write(bool value) {
