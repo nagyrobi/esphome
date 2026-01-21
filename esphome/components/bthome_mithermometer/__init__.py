@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 from esphome.components import esp32_ble_tracker
 import esphome.config_validation as cv
-from esphome.const import CONF_BINDKEY, CONF_ENCRYPTION_REQUIRED, CONF_ID, CONF_MAC_ADDRESS
+from esphome.const import CONF_BINDKEY, CONF_ID, CONF_MAC_ADDRESS
 
 CODEOWNERS = ["@nagyrobi"]
 DEPENDENCIES = ["esp32_ble_tracker"]
@@ -12,6 +12,8 @@ bthome_mithermometer_ns = cg.esphome_ns.namespace("bthome_mithermometer")
 BTHomeMiThermometer = bthome_mithermometer_ns.class_(
     "BTHomeMiThermometer", esp32_ble_tracker.ESPBTDeviceListener, cg.Component
 )
+
+CONF_ENCRYPTION_REQUIRED = "encryption_required"
 
 
 def bthome_mithermometer_base_schema(extra_schema=None):
