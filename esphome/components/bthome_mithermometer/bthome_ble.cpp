@@ -191,30 +191,35 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   std::span<const uint8_t> payload(data);
   bool decrypted_payload = false;
 
-  const auto try_decrypt = [&](uint8_t info_byte) -> bool {
+  const auto try_decrypt = [&](uint8_t info_byte, bool has_mac) -> bool {
     if (!this->bindkey_set_) {
       ESP_LOGV(TAG, "Encrypted BTHome frame received but no bindkey set for %s", device.address_str_to(addr_buf));
       return false;
     }
-    if (data.size() < 1 + 4 + 4) {
+    const size_t header_size = 1 + (has_mac ? 6 : 0);
+    if (data.size() < header_size + 4 + 4) {
       ESP_LOGVV(TAG, "BTHome encrypted payload too short: %zu", data.size());
       return false;
     }
 
-    const size_t cipher_size = data.size() - 1 - 8;
+    const size_t cipher_size = data.size() - header_size - 8;
     if (cipher_size == 0) {
       ESP_LOGVV(TAG, "BTHome encrypted payload missing data");
       return false;
     }
 
-    const size_t counter_index = 1 + cipher_size;
+    const size_t counter_index = header_size + cipher_size;
     const uint8_t *counter = &data[counter_index];
     const uint8_t *mic = &data[counter_index + 4];
 
     std::array<uint8_t, 6> mac{};
-    uint64_t address = device.address_uint64();
-    for (size_t i = 0; i < mac.size(); i++) {
-      mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
+    if (has_mac) {
+      std::copy_n(&data[1], mac.size(), mac.begin());
+    } else {
+      uint64_t address = device.address_uint64();
+      for (size_t i = 0; i < mac.size(); i++) {
+        mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
+      }
     }
 
     std::array<uint8_t, 13> nonce{};
@@ -233,7 +238,7 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
       mbedtls_ccm_free(&ctx);
       return false;
     }
-    ret = mbedtls_ccm_auth_decrypt(&ctx, cipher_size, nonce.data(), nonce.size(), nullptr, 0, &data[1],
+    ret = mbedtls_ccm_auth_decrypt(&ctx, cipher_size, nonce.data(), nonce.size(), nullptr, 0, &data[header_size],
                                    plaintext.data(), mic, 4);
     mbedtls_ccm_free(&ctx);
     if (ret != 0) {
@@ -241,20 +246,23 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
       return false;
     }
 
-    decrypted.reserve(1 + cipher_size);
+    decrypted.reserve(header_size + cipher_size);
     decrypted.push_back(info_byte);
+    if (has_mac) {
+      decrypted.insert(decrypted.end(), mac.begin(), mac.end());
+    }
     decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
     payload = std::span<const uint8_t>(decrypted);
     return true;
   };
 
   if (is_encrypted) {
-    decrypted_payload = try_decrypt(adv_info);
+    decrypted_payload = try_decrypt(adv_info, mac_included);
     if (!decrypted_payload) {
       return false;
     }
   } else if (this->bindkey_set_) {
-    decrypted_payload = try_decrypt(adv_info);
+    decrypted_payload = try_decrypt(adv_info, mac_included);
     if (decrypted_payload) {
       is_encrypted = true;
     }
