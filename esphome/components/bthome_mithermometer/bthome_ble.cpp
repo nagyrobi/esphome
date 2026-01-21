@@ -221,39 +221,45 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
         mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
       }
     }
+    std::array<uint8_t, 6> mac_candidates[2]{mac, mac};
+    std::reverse(mac_candidates[1].begin(), mac_candidates[1].end());
 
-    std::array<uint8_t, 13> nonce{};
-    std::copy(mac.begin(), mac.end(), nonce.begin());
-    nonce[6] = 0xD2;
-    nonce[7] = 0xFC;
-    nonce[8] = info_byte;
-    memcpy(&nonce[9], counter, 4);
+    for (const auto &mac_candidate : mac_candidates) {
+      std::array<uint8_t, 13> nonce{};
+      std::copy(mac_candidate.begin(), mac_candidate.end(), nonce.begin());
+      nonce[6] = 0xD2;
+      nonce[7] = 0xFC;
+      nonce[8] = info_byte;
+      memcpy(&nonce[9], counter, 4);
 
-    std::vector<uint8_t> plaintext(cipher_size);
-    mbedtls_ccm_context ctx;
-    mbedtls_ccm_init(&ctx);
-    int ret = mbedtls_ccm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, this->bindkey_, BTHOME_BINDKEY_SIZE * 8);
-    if (ret != 0) {
-      ESP_LOGVV(TAG, "BTHome decryption failed to set key.");
+      std::vector<uint8_t> plaintext(cipher_size);
+      mbedtls_ccm_context ctx;
+      mbedtls_ccm_init(&ctx);
+      int ret = mbedtls_ccm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, this->bindkey_, BTHOME_BINDKEY_SIZE * 8);
+      if (ret != 0) {
+        ESP_LOGVV(TAG, "BTHome decryption failed to set key.");
+        mbedtls_ccm_free(&ctx);
+        return false;
+      }
+      ret = mbedtls_ccm_auth_decrypt(&ctx, cipher_size, nonce.data(), nonce.size(), nullptr, 0, &data[header_size],
+                                     plaintext.data(), mic, 4);
       mbedtls_ccm_free(&ctx);
-      return false;
-    }
-    ret = mbedtls_ccm_auth_decrypt(&ctx, cipher_size, nonce.data(), nonce.size(), nullptr, 0, &data[header_size],
-                                   plaintext.data(), mic, 4);
-    mbedtls_ccm_free(&ctx);
-    if (ret != 0) {
-      ESP_LOGVV(TAG, "BTHome authenticated decryption failed.");
-      return false;
+      if (ret != 0) {
+        continue;
+      }
+
+      decrypted.reserve(header_size + cipher_size);
+      decrypted.push_back(info_byte);
+      if (has_mac) {
+        decrypted.insert(decrypted.end(), mac.begin(), mac.end());
+      }
+      decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
+      payload = std::span<const uint8_t>(decrypted);
+      return true;
     }
 
-    decrypted.reserve(header_size + cipher_size);
-    decrypted.push_back(info_byte);
-    if (has_mac) {
-      decrypted.insert(decrypted.end(), mac.begin(), mac.end());
-    }
-    decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
-    payload = std::span<const uint8_t>(decrypted);
-    return true;
+    ESP_LOGVV(TAG, "BTHome authenticated decryption failed.");
+    return false;
   };
 
   if (is_encrypted) {
