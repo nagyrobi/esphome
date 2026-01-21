@@ -187,15 +187,11 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   }
 
   char addr_buf[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
-  if (this->require_encryption_ && !is_encrypted) {
-    ESP_LOGD(TAG, "Ignoring unencrypted BTHome frame from %s", device.address_str_to(addr_buf));
-    return false;
-  }
-
   std::vector<uint8_t> decrypted;
   std::span<const uint8_t> payload(data);
+  bool decrypted_payload = false;
 
-  if (is_encrypted) {
+  const auto try_decrypt = [&](uint8_t info_byte) -> bool {
     if (!this->bindkey_set_) {
       ESP_LOGV(TAG, "Encrypted BTHome frame received but no bindkey set for %s", device.address_str_to(addr_buf));
       return false;
@@ -225,7 +221,7 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
     std::copy(mac.begin(), mac.end(), nonce.begin());
     nonce[6] = 0xD2;
     nonce[7] = 0xFC;
-    nonce[8] = adv_info;
+    nonce[8] = info_byte;
     memcpy(&nonce[9], counter, 4);
 
     std::vector<uint8_t> plaintext(cipher_size);
@@ -246,9 +242,27 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
     }
 
     decrypted.reserve(1 + cipher_size);
-    decrypted.push_back(adv_info);
+    decrypted.push_back(info_byte);
     decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
     payload = std::span<const uint8_t>(decrypted);
+    return true;
+  };
+
+  if (is_encrypted) {
+    decrypted_payload = try_decrypt(adv_info);
+    if (!decrypted_payload) {
+      return false;
+    }
+  } else if (this->bindkey_set_) {
+    decrypted_payload = try_decrypt(adv_info);
+    if (decrypted_payload) {
+      is_encrypted = true;
+    }
+  }
+
+  if (this->require_encryption_ && !is_encrypted) {
+    ESP_LOGD(TAG, "Ignoring unencrypted BTHome frame from %s", device.address_str_to(addr_buf));
+    return false;
   }
 
   size_t payload_index = 1;
