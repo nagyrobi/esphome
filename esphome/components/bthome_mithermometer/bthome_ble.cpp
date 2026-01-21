@@ -3,8 +3,12 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
+#include "mbedtls/ccm.h"
+
+#include <algorithm>
 #include <array>
 #include <span>
+#include <vector>
 
 #ifdef USE_ESP32
 
@@ -12,6 +16,7 @@ namespace esphome {
 namespace bthome_mithermometer {
 
 static const char *const TAG = "bthome_mithermometer";
+static constexpr size_t BTHOME_BINDKEY_SIZE = 16;
 
 static const char *format_mac_address(std::span<char, MAC_ADDRESS_PRETTY_BUFFER_SIZE> buffer, uint64_t address) {
   std::array<uint8_t, MAC_ADDRESS_SIZE> mac{};
@@ -130,6 +135,14 @@ void BTHomeMiThermometer::dump_config() {
   char addr_buf[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
   ESP_LOGCONFIG(TAG, "BTHome MiThermometer");
   ESP_LOGCONFIG(TAG, "  MAC Address: %s", format_mac_address(addr_buf, this->address_));
+  if (this->bindkey_set_) {
+    char bindkey_hex[format_hex_pretty_size(BTHOME_BINDKEY_SIZE)];
+    ESP_LOGCONFIG(TAG, "  Bindkey: %s",
+                  format_hex_pretty_to(bindkey_hex, this->bindkey_, BTHOME_BINDKEY_SIZE, '.'));
+  } else {
+    ESP_LOGCONFIG(TAG, "  Bindkey: (not set)");
+  }
+  ESP_LOGCONFIG(TAG, "  Encryption Required: %s", YESNO(this->require_encryption_));
   LOG_SENSOR("  ", "Temperature", this->temperature_);
   LOG_SENSOR("  ", "Humidity", this->humidity_);
   LOG_SENSOR("  ", "Battery Level", this->battery_level_);
@@ -162,8 +175,8 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
     return false;
   }
 
-  const uint8_t adv_info = data[0];
-  const bool is_encrypted = adv_info & 0x01;
+  uint8_t adv_info = data[0];
+  bool is_encrypted = adv_info & 0x01;
   const bool mac_included = adv_info & 0x02;
   const bool is_trigger_based = adv_info & 0x04;
   const uint8_t version = (adv_info >> 5) & 0x07;
@@ -174,22 +187,81 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   }
 
   char addr_buf[MAC_ADDRESS_PRETTY_BUFFER_SIZE];
-  if (is_encrypted) {
-    ESP_LOGV(TAG, "Ignoring encrypted BTHome frame from %s", device.address_str_to(addr_buf));
+  if (this->require_encryption_ && !is_encrypted) {
+    ESP_LOGD(TAG, "Ignoring unencrypted BTHome frame from %s", device.address_str_to(addr_buf));
     return false;
+  }
+
+  std::vector<uint8_t> decrypted;
+  std::span<const uint8_t> payload(data);
+
+  if (is_encrypted) {
+    if (!this->bindkey_set_) {
+      ESP_LOGV(TAG, "Encrypted BTHome frame received but no bindkey set for %s", device.address_str_to(addr_buf));
+      return false;
+    }
+    if (data.size() < 1 + 4 + 4) {
+      ESP_LOGVV(TAG, "BTHome encrypted payload too short: %zu", data.size());
+      return false;
+    }
+
+    const size_t cipher_size = data.size() - 1 - 8;
+    if (cipher_size == 0) {
+      ESP_LOGVV(TAG, "BTHome encrypted payload missing data");
+      return false;
+    }
+
+    const size_t counter_index = 1 + cipher_size;
+    const uint8_t *counter = &data[counter_index];
+    const uint8_t *mic = &data[counter_index + 4];
+
+    std::array<uint8_t, 6> mac{};
+    uint64_t address = device.address_uint64();
+    for (size_t i = 0; i < mac.size(); i++) {
+      mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
+    }
+
+    std::array<uint8_t, 13> nonce{};
+    std::copy(mac.begin(), mac.end(), nonce.begin());
+    nonce[6] = 0xD2;
+    nonce[7] = 0xFC;
+    nonce[8] = adv_info;
+    memcpy(&nonce[9], counter, 4);
+
+    std::vector<uint8_t> plaintext(cipher_size);
+    mbedtls_ccm_context ctx;
+    mbedtls_ccm_init(&ctx);
+    int ret = mbedtls_ccm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, this->bindkey_, BTHOME_BINDKEY_SIZE * 8);
+    if (ret != 0) {
+      ESP_LOGVV(TAG, "BTHome decryption failed to set key.");
+      mbedtls_ccm_free(&ctx);
+      return false;
+    }
+    ret = mbedtls_ccm_auth_decrypt(&ctx, cipher_size, nonce.data(), nonce.size(), nullptr, 0, &data[1],
+                                   plaintext.data(), mic, 4);
+    mbedtls_ccm_free(&ctx);
+    if (ret != 0) {
+      ESP_LOGVV(TAG, "BTHome authenticated decryption failed.");
+      return false;
+    }
+
+    decrypted.reserve(1 + cipher_size);
+    decrypted.push_back(adv_info);
+    decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
+    payload = std::span<const uint8_t>(decrypted);
   }
 
   size_t payload_index = 1;
   uint64_t source_address = device.address_uint64();
 
   if (mac_included) {
-    if (data.size() < 7) {
+    if (payload.size() < 7) {
       ESP_LOGVV(TAG, "BTHome payload missing MAC address");
       return false;
     }
     source_address = 0;
     for (int i = 5; i >= 0; i--) {
-      source_address = (source_address << 8) | data[1 + i];
+      source_address = (source_address << 8) | payload[1 + i];
     }
     payload_index = 7;
   }
@@ -199,7 +271,7 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
     return false;
   }
 
-  if (payload_index >= data.size()) {
+  if (payload_index >= payload.size()) {
     ESP_LOGVV(TAG, "BTHome payload empty after header");
     return false;
   }
@@ -208,16 +280,16 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   size_t offset = payload_index;
   uint8_t last_type = 0;
 
-  while (offset < data.size()) {
-    const uint8_t obj_type = data[offset++];
+  while (offset < payload.size()) {
+    const uint8_t obj_type = payload[offset++];
     size_t value_length = 0;
     bool has_length_byte = obj_type == 0x53;  // text objects include explicit length
 
     if (has_length_byte) {
-      if (offset >= data.size()) {
+      if (offset >= payload.size()) {
         break;
       }
-      value_length = data[offset++];
+      value_length = payload[offset++];
     } else {
       if (!get_bthome_value_length(obj_type, value_length)) {
         ESP_LOGVV(TAG, "Unknown BTHome object 0x%02X", obj_type);
@@ -229,12 +301,12 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
       break;
     }
 
-    if (offset + value_length > data.size()) {
+    if (offset + value_length > payload.size()) {
       ESP_LOGVV(TAG, "BTHome object length exceeds payload");
       break;
     }
 
-    const uint8_t *value = &data[offset];
+    const uint8_t *value = &payload[offset];
     offset += value_length;
 
     if (obj_type < last_type) {
@@ -292,6 +364,11 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   }
 
   return reported;
+}
+
+void BTHomeMiThermometer::set_bindkey(const char *bindkey) {
+  parse_hex(bindkey, this->bindkey_, sizeof(this->bindkey_));
+  this->bindkey_set_ = true;
 }
 
 }  // namespace bthome_mithermometer

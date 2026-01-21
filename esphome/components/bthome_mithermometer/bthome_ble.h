@@ -14,6 +14,8 @@ namespace bthome_mithermometer {
 class BTHomeMiThermometer : public esp32_ble_tracker::ESPBTDeviceListener, public Component {
  public:
   void set_address(uint64_t address) { this->address_ = address; }
+  void set_bindkey(const char *bindkey);
+  void set_require_encryption(bool require_encryption) { this->require_encryption_ = require_encryption; }
 
   void set_temperature(sensor::Sensor *temperature) { this->temperature_ = temperature; }
   void set_humidity(sensor::Sensor *humidity) { this->humidity_ = humidity; }
@@ -30,6 +32,9 @@ class BTHomeMiThermometer : public esp32_ble_tracker::ESPBTDeviceListener, publi
 
   uint64_t address_{0};
   optional<uint8_t> last_packet_id_{};
+  uint8_t bindkey_[16]{};
+  bool bindkey_set_{false};
+  bool require_encryption_{false};
 
   sensor::Sensor *temperature_{nullptr};
   sensor::Sensor *humidity_{nullptr};
