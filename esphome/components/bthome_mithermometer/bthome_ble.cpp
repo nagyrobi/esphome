@@ -191,12 +191,12 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   std::span<const uint8_t> payload(data);
   bool decrypted_payload = false;
 
-  const auto try_decrypt = [&](uint8_t info_byte, bool has_mac) -> bool {
+  const auto try_decrypt = [&](uint8_t info_byte) -> bool {
     if (!this->bindkey_set_) {
       ESP_LOGV(TAG, "Encrypted BTHome frame received but no bindkey set for %s", device.address_str_to(addr_buf));
       return false;
     }
-    const size_t header_size = 1 + (has_mac ? 6 : 0);
+    const size_t header_size = 1;
     if (data.size() < header_size + 4 + 4) {
       ESP_LOGVV(TAG, "BTHome encrypted payload too short: %zu", data.size());
       return false;
@@ -213,13 +213,9 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
     const uint8_t *mic = &data[counter_index + 4];
 
     std::array<uint8_t, 6> mac{};
-    if (has_mac) {
-      std::copy_n(&data[1], mac.size(), mac.begin());
-    } else {
-      uint64_t address = device.address_uint64();
-      for (size_t i = 0; i < mac.size(); i++) {
-        mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
-      }
+    uint64_t address = device.address_uint64();
+    for (size_t i = 0; i < mac.size(); i++) {
+      mac[i] = (address >> ((mac.size() - 1 - i) * 8)) & 0xFF;
     }
     std::array<uint8_t, 6> mac_candidates[2]{mac, mac};
     std::reverse(mac_candidates[1].begin(), mac_candidates[1].end());
@@ -250,9 +246,6 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
 
       decrypted.reserve(header_size + cipher_size);
       decrypted.push_back(info_byte);
-      if (has_mac) {
-        decrypted.insert(decrypted.end(), mac.begin(), mac.end());
-      }
       decrypted.insert(decrypted.end(), plaintext.begin(), plaintext.end());
       payload = std::span<const uint8_t>(decrypted);
       return true;
@@ -263,12 +256,12 @@ bool BTHomeMiThermometer::handle_service_data_(const esp32_ble_tracker::ServiceD
   };
 
   if (is_encrypted) {
-    decrypted_payload = try_decrypt(adv_info, mac_included);
+    decrypted_payload = try_decrypt(adv_info);
     if (!decrypted_payload) {
       return false;
     }
   } else if (this->bindkey_set_) {
-    decrypted_payload = try_decrypt(adv_info, mac_included);
+    decrypted_payload = try_decrypt(adv_info);
     if (decrypted_payload) {
       is_encrypted = true;
     }
